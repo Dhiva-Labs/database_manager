@@ -1,5 +1,9 @@
 # Database Manager
 
+[![ARM64 builds](https://github.com/Dhiva-Labs/database_manager/actions/workflows/desktop.yml/badge.svg?branch=main)](https://github.com/Dhiva-Labs/database_manager/actions/workflows/desktop.yml)
+![Linux x64 | arm64](https://img.shields.io/badge/Linux-x64%20%7C%20arm64-informational?logo=linux&logoColor=white)
+![Windows x64 | arm64](https://img.shields.io/badge/Windows-x64%20%7C%20arm64-informational?logo=windows&logoColor=white)
+
 A desktop-first Flutter database client for browsing, editing, exporting and
 backing up databases across five engines from one UI.
 
@@ -60,11 +64,36 @@ backing up databases across five engines from one UI.
 - LMDB keys/values are shown as UTF-8 when printable, otherwise `0x…` hex;
   hex is accepted as input too.
 
+## Install
+
+Every release carries the desktop builds for x64 and arm64:
+
+| Platform | Architecture | Asset |
+|---|---|---|
+| Linux (Debian, Ubuntu) | x64 | `database-manager_<version>_amd64.deb` |
+| Linux (Debian, Ubuntu) | arm64 | `database-manager_<version>_arm64.deb` |
+| Windows | x64 | `DatabaseManager-<version>-windows-x64.zip` |
+| Windows | arm64 | `DatabaseManager-<version>-windows-arm64.zip` |
+
+```bash
+sudo apt install ./database-manager_<version>_arm64.deb   # or _amd64.deb
+```
+
+On Windows, unzip and run `database_manager.exe`. SQLCipher is bundled on every
+platform (the `sqlcipher.dll` / `libsqlcipher.so` next to the executable), so
+SQLite and SQLCipher files work out of the box. LMDB needs a system library:
+`liblmdb0` on Linux (a recommended dependency of the .deb), `lmdb.dll` on Windows
+for the architecture you run.
+
+The [Desktop builds](.github/workflows/desktop.yml) workflow builds, tests and
+starts the packaged app on Linux and Windows, x64 and arm64, on every push.
+
 ## Build
 
 ```bash
 flutter pub get
 flutter build linux --release   # or: flutter build apk / windows
+packaging/make_deb.sh           # .deb for the architecture you built on (amd64 or arm64)
 ```
 
 Run tests:

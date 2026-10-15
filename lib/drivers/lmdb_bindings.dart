@@ -116,6 +116,7 @@ class Lmdb {
             'liblmdb.so',
             'liblmdb.so.0',
             '/usr/lib/x86_64-linux-gnu/liblmdb.so.0',
+            '/usr/lib/aarch64-linux-gnu/liblmdb.so.0',
             '/usr/lib/liblmdb.so',
             'liblmdb.dylib',
           ];
