@@ -37,8 +37,10 @@ cp "$deb_amd64" "$work/"
 if grep -n '@[A-Z0-9_]*@' "$work/PKGBUILD"; then echo "unfilled placeholder" >&2; exit 1; fi
 
 # The build runs as an unprivileged user (makepkg refuses root); the files
-# are handed back to the caller afterwards so the cleanup trap can delete them.
+# are handed back to the caller on the way out, so the cleanup trap here can
+# delete them whether makepkg succeeded or not.
 docker run --rm -v "$work:/build" -e HOST_IDS="$(id -u):$(id -g)" archlinux:latest bash -euo pipefail -c '
+  trap "chown -R \"\$HOST_IDS\" /build" EXIT
   pacman -Syu --noconfirm --needed -q base-devel namcap
   useradd -m builder
   chown -R builder /build
@@ -48,7 +50,6 @@ docker run --rm -v "$work:/build" -e HOST_IDS="$(id -u):$(id -g)" archlinux:late
   namcap PKGBUILD
   pacman -U --noconfirm ./*-x86_64.pkg.tar.zst
   cat .SRCINFO
-  chown -R "$HOST_IDS" /build
 '
 tar -C "$work" -czf "$out/$NAME-bin-$VERSION-aur.tar.gz" PKGBUILD .SRCINFO
 ls -l "$out/$NAME-bin-$VERSION-aur.tar.gz"

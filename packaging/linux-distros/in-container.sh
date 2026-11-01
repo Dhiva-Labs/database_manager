@@ -15,8 +15,10 @@ case "$MODE" in
     ;;
   rpm-suse)
     zypper -n -q --gpg-auto-import-keys refresh
-    zypper -n -q install file findutils which procps \
-      xvfb-run Mesa-dri dbus-1 xdotool
+    # gawk: xvfb-run needs awk. dbus-run-session is not in dbus-1 (now
+    # dbus-broker) but in dbus-1-daemon.
+    zypper -n -q install file findutils which procps gawk \
+      xvfb-run Mesa-dri dbus-1-daemon xdotool
     ;;
   pacman)
     pacman -Syu --noconfirm --needed -q file findutils which procps-ng \
