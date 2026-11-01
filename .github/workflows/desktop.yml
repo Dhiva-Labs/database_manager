@@ -2,7 +2,10 @@ name: Desktop builds
 
 # Linux and Windows, x64 and arm64, built natively on a runner of each
 # architecture. Every leg runs the tests, checks the machine type of every
-# binary in the bundle, packages it and starts the packaged app once.
+# binary in the bundle, packages it and starts the packaged app once. The
+# Linux .deb is then repackaged as .rpm (Fedora, RHEL, openSUSE), Arch
+# package, AppImage and Flatpak, and an AUR PKGBUILD, each installed and run
+# on its distribution.
 # A published release gets the packages attached; names that are already on
 # the release (hand-uploaded files) are left alone.
 
@@ -342,9 +345,227 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
+  # Repackages each architecture's .deb for Fedora/RHEL/openSUSE (.rpm),
+  # Arch (.pkg.tar.zst) and any glibc distribution (AppImage), then installs
+  # every one of them on the real distribution and runs it there: ldd of
+  # every ELF file, the app under Xvfb until its window is up and Dart has
+  # created the data folder, and the liblmdb the LMDB driver loads.
+  distros:
+    name: Other distros ${{ matrix.arch }}
+    needs: [linux]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, deb_arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, deb_arch: arm64, runner: ubuntu-24.04-arm }
+    env:
+      NFPM_VERSION: '2.48.0'
+      APPIMAGETOOL_VERSION: '1.9.1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-${{ matrix.arch }}
+          path: deb
+
+      - name: Install nfpm and appimagetool
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$(uname -m)" in
+            x86_64) nfpm_arch=x86_64; ai_arch=x86_64 ;;
+            aarch64) nfpm_arch=arm64; ai_arch=aarch64 ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/bin"
+          cd "$RUNNER_TEMP/bin"
+          tarball="nfpm_${NFPM_VERSION}_Linux_${nfpm_arch}.tar.gz"
+          gh release download "v$NFPM_VERSION" -R goreleaser/nfpm -p "$tarball" -p checksums.txt
+          grep " $tarball\$" checksums.txt | sha256sum -c -
+          tar -xzf "$tarball" nfpm
+          gh release download "$APPIMAGETOOL_VERSION" -R AppImage/appimagetool \
+            -p "appimagetool-$ai_arch.AppImage" -O appimagetool
+          chmod +x appimagetool
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # The AppImage and the Flatpak carry liblmdb.so.0 from this machine
+      # (BUNDLE_LIBS in distro.conf): the package the .deb recommends.
+      - name: Install the library to bundle
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblmdb0
+
+      # One installed tree, the .deb's, for every format. The Flatpak job
+      # gets the same cleaned tree (tar keeps modes and symlinks).
+      - name: Build .rpm, Arch package and AppImage
+        run: |
+          VERSION="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          dpkg-deb -x "deb/database-manager_${VERSION}_${{ matrix.deb_arch }}.deb" "$RUNNER_TEMP/root"
+          VERSION="$VERSION" TREE_TARBALL="$RUNNER_TEMP/tree.tar.xz" \
+            packaging/linux-distros/pack.sh "$RUNNER_TEMP/root" ${{ matrix.deb_arch }} dist
+
+      - name: Install and run on Fedora, openSUSE and Arch
+        run: packaging/linux-distros/verify.sh dist ${{ matrix.deb_arch }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: distros-${{ matrix.arch }}
+          path: |
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+            dist/*.AppImage
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tree-${{ matrix.arch }}
+          path: ${{ runner.temp }}/tree.tar.xz
+          if-no-files-found: error
+          retention-days: 3
+
+  # AUR recipe: PKGBUILD + .SRCINFO for database-manager-bin, rendered with this
+  # build's checksums and proven with makepkg on archlinux:latest.
+  aur:
+    name: AUR PKGBUILD
+    needs: [linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: 'linux-*'
+          path: debs
+          merge-multiple: true
+
+      # A release run renders the download URLs with the release's own tag.
+      - name: Render and check the PKGBUILD
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          VERSION="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          VERSION="$VERSION" packaging/arch/aur.sh \
+            "debs/database-manager_${VERSION}_amd64.deb" "debs/database-manager_${VERSION}_arm64.deb" dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aur
+          path: dist/*-aur.tar.gz
+          if-no-files-found: error
+
+  # Builds the Flatpak from the same tree, installs the bundle and runs it in
+  # the sandbox: ldd of every ELF file against the GNOME runtime, the
+  # bundled liblmdb.so.0 loaded by name as the LMDB driver does, and the app
+  # under Xvfb until its window is up and Dart has created the data folder.
+  flatpak:
+    name: Flatpak ${{ matrix.arch }}
+    needs: [distros]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, fp_arch: x86_64, runner: ubuntu-24.04 }
+          - { arch: arm64, fp_arch: aarch64, runner: ubuntu-24.04-arm }
+    env:
+      APP_ID: com.dhivalabs.database_manager
+    steps:
+      - uses: actions/checkout@v7
+
+      # A workspace path: inside a container job, runner.temp names the
+      # host's directory, not the container's $RUNNER_TEMP.
+      - uses: actions/download-artifact@v8
+        with:
+          name: tree-${{ matrix.arch }}
+          path: flatpak-tree
+
+      # The metainfo's newest <release> must be this version, or software
+      # centres show a stale one.
+      - name: Unpack the installed tree
+        id: v
+        run: |
+          VERSION="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          grep -F "<release version=\"$VERSION\"" "packaging/flatpak/$APP_ID.metainfo.xml" ||
+            { echo "::error::add <release version=\"$VERSION\" .../> to packaging/flatpak/$APP_ID.metainfo.xml"; exit 1; }
+          mkdir -p packaging/flatpak/tree
+          tar -xJf flatpak-tree/tree.tar.xz -C packaging/flatpak/tree
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: packaging/flatpak/${{ env.APP_ID }}.yml
+          bundle: database-manager-${{ steps.v.outputs.version }}-${{ matrix.fp_arch }}.flatpak
+          artifact-name: flatpak-${{ matrix.arch }}
+          arch: ${{ matrix.fp_arch }}
+          cache: false
+
+      - name: Install the bundle and run it
+        timeout-minutes: 10
+        env:
+          BUNDLE: database-manager-${{ steps.v.outputs.version }}-${{ matrix.fp_arch }}.flatpak
+        run: |
+          flatpak install -y --noninteractive --bundle "$BUNDLE"
+          flatpak info "$APP_ID"
+          flatpak info --show-permissions "$APP_ID"
+
+          # Every ELF file in /app must find all of its libraries in the
+          # runtime or next to it.
+          flatpak run --command=bash "$APP_ID" -c '
+            set -euo pipefail
+            mapfile -d "" elfs < <(find /app -type f -print0)
+            n=0; bad=0
+            for f in "${elfs[@]}"; do
+              [ "$(head -c 4 "$f" | od -An -tx1 | tr -d " \n")" = 7f454c46 ] || continue
+              n=$((n + 1))
+              if LD_LIBRARY_PATH=/app/lib/database-manager/lib ldd "$f" | grep "not found"; then
+                echo "missing libraries for $f"; bad=1
+              fi
+            done
+            echo "$n ELF files checked with ldd"
+            [ "$bad" = 0 ] && [ "$n" -ge 5 ]
+          '
+
+          # LMDB: the driver dlopens liblmdb.so.0 by name.
+          flatpak run --command=python3 "$APP_ID" -c \
+            'import ctypes; print(ctypes.CDLL("liblmdb.so.0"))'
+
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime"
+          mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+          cat > "$RUNNER_TEMP/smoke.sh" <<'EOS'
+          log="$RUNNER_TEMP/flatpak-smoke.log"
+          flatpak run "$APP_ID" > "$log" 2>&1 &
+          pid=$!
+          for i in $(seq 1 90); do
+            kill -0 "$pid" 2> /dev/null || { echo "the app exited early"; cat "$log"; exit 1; }
+            if python3 packaging/flatpak/x11_window.py 'Database Manager' &&
+               [ -d "$HOME/.var/app/$APP_ID/data/com.dhivalabs.database_manager" ] && [ "$i" -ge 20 ]; then
+              echo "still running after ${i}s; data folder:"
+              ls -la "$HOME/.var/app/$APP_ID/data/com.dhivalabs.database_manager"
+              kill "$pid"
+              cat "$log"
+              if grep -E 'error while loading shared libraries|cannot open shared object|undefined symbol' "$log"; then exit 1; fi
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "no Database Manager window and data folder after 90s"
+          find "$HOME/.var/app" -maxdepth 4
+          cat "$log"
+          exit 1
+          EOS
+          xvfb-run -a -s '-screen 0 1280x800x24' dbus-run-session -- bash "$RUNNER_TEMP/smoke.sh"
+
   release:
     name: Release assets
-    needs: [linux, windows]
+    needs: [linux, windows, distros, aur, flatpak]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -355,11 +576,35 @@ jobs:
           sparse-checkout: pubspec.yaml
           sparse-checkout-cone-mode: false
 
+      # Named patterns, not every artifact: the tree-* ones are build input.
       - uses: actions/download-artifact@v8
         with:
-          pattern: '*-*'
+          pattern: 'linux-*'
           path: assets
           merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: 'windows-*'
+          path: assets
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: 'distros-*'
+          path: assets
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: 'flatpak-*'
+          path: assets
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: aur
+          path: assets
 
       - name: Select the release assets
         id: select
@@ -368,6 +613,11 @@ jobs:
           FILES=""
           for arch in amd64 arm64; do FILES="$FILES assets/database-manager_${VERSION}_${arch}.deb"; done
           for arch in x64 arm64; do FILES="$FILES assets/DatabaseManager-${VERSION}-windows-${arch}.zip"; done
+          for m in x86_64 aarch64; do
+            FILES="$FILES assets/database-manager-${VERSION}-1.${m}.rpm assets/database-manager-${VERSION}-1-${m}.pkg.tar.zst"
+            FILES="$FILES assets/DatabaseManager-${VERSION}-${m}.AppImage assets/database-manager-${VERSION}-${m}.flatpak"
+          done
+          FILES="$FILES assets/database-manager-bin-${VERSION}-aur.tar.gz"
           ls -l assets
           ls -l $FILES
           echo "files=$FILES" >> "$GITHUB_OUTPUT"

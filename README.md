@@ -3,6 +3,7 @@
 [![ARM64 builds](https://github.com/Dhiva-Labs/database_manager/actions/workflows/desktop.yml/badge.svg?branch=main)](https://github.com/Dhiva-Labs/database_manager/actions/workflows/desktop.yml)
 ![Linux x64 | arm64](https://img.shields.io/badge/Linux-x64%20%7C%20arm64-informational?logo=linux&logoColor=white)
 ![Windows x64 | arm64](https://img.shields.io/badge/Windows-x64%20%7C%20arm64-informational?logo=windows&logoColor=white)
+![Linux: deb | rpm | Arch | AppImage | Flatpak](https://img.shields.io/badge/Linux-deb%20%7C%20rpm%20%7C%20Arch%20%7C%20AppImage%20%7C%20Flatpak-informational?logo=linux&logoColor=white)
 
 A desktop-first Flutter database client for browsing, editing, exporting and
 backing up databases across five engines from one UI.
@@ -72,12 +73,34 @@ Every release carries the desktop builds for x64 and arm64:
 |---|---|---|
 | Linux (Debian, Ubuntu) | x64 | `database-manager_<version>_amd64.deb` |
 | Linux (Debian, Ubuntu) | arm64 | `database-manager_<version>_arm64.deb` |
+| Linux (Fedora, RHEL, openSUSE) | x64 / arm64 | `database-manager-<version>-1.x86_64.rpm` / `.aarch64.rpm` |
+| Linux (Arch, Manjaro, EndeavourOS) | x64 / arm64 | `database-manager-<version>-1-x86_64.pkg.tar.zst` / `-aarch64.pkg.tar.zst` |
+| Linux (any distribution) | x64 / arm64 | `DatabaseManager-<version>-x86_64.AppImage` / `-aarch64.AppImage` |
+| Linux (Flatpak) | x64 / arm64 | `database-manager-<version>-x86_64.flatpak` / `-aarch64.flatpak` |
 | Windows | x64 | `DatabaseManager-<version>-windows-x64.zip` |
 | Windows | arm64 | `DatabaseManager-<version>-windows-arm64.zip` |
 
 ```bash
 sudo apt install ./database-manager_<version>_arm64.deb   # or _amd64.deb
+sudo dnf install ./database-manager-<version>-1.x86_64.rpm                          # Fedora, RHEL
+sudo zypper install --allow-unsigned-rpm ./database-manager-<version>-1.x86_64.rpm  # openSUSE
+sudo pacman -U ./database-manager-<version>-1-x86_64.pkg.tar.zst                    # Arch
+chmod +x DatabaseManager-<version>-x86_64.AppImage && ./DatabaseManager-<version>-x86_64.AppImage
+flatpak install --user ./database-manager-<version>-x86_64.flatpak                 # then: flatpak run com.dhivalabs.database_manager
 ```
+
+The .rpm, Arch package, AppImage and Flatpak hold the same build as the .deb
+and are attached to releases from 1.0.1 on. The .rpm, Arch package and
+AppImage are built on Ubuntu 24.04 and need glibc 2.38 or newer (Fedora 40+,
+RHEL 10, openSUSE Tumbleweed / Leap 16, current Arch). The .rpm is not signed.
+For LMDB, the .rpm recommends `lmdb-devel` (Fedora and openSUSE ship
+liblmdb only under a versioned name; the -devel package adds the
+`liblmdb.so` the driver loads), the Arch package depends on `lmdb`, and the
+AppImage and Flatpak carry `liblmdb.so.0` themselves. The Flatpak can reach
+database servers and your home folder (SQLite needs its journal files next
+to the database); see [packaging/flatpak/README.md](packaging/flatpak/README.md).
+An AUR recipe for `database-manager-bin` (PKGBUILD and .SRCINFO) is attached
+as `database-manager-bin-<version>-aur.tar.gz`.
 
 On Windows, unzip and run `database_manager.exe`. SQLCipher is bundled on every
 platform (the `sqlcipher.dll` / `libsqlcipher.so` next to the executable), so
