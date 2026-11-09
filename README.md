@@ -8,6 +8,8 @@
 A desktop-first Flutter database client for browsing, editing, exporting and
 backing up databases across five engines from one UI.
 
+**Documentation:** step-by-step guides at [learn.dhivalabs.com](https://learn.dhivalabs.com/apps/database-manager/): [install](https://learn.dhivalabs.com/apps/database-manager/install) · [beginner guide](https://learn.dhivalabs.com/apps/database-manager/getting-started) · [troubleshooting](https://learn.dhivalabs.com/apps/database-manager/faq). New to the topic? Try the [Databases](https://learn.dhivalabs.com/tracks/databases/) learning track.
+
 ## Supported engines
 
 | Engine | Connect via | Query tab | Row editing | Backup format |
